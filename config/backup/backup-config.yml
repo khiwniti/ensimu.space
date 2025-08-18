@@ -1,0 +1,246 @@
+# Backup and Recovery Configuration for EnsimuSpace Production
+
+backup:
+  # General backup settings
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM UTC
+  retention:
+    daily: 7    # Keep 7 daily backups
+    weekly: 4   # Keep 4 weekly backups
+    monthly: 12 # Keep 12 monthly backups
+    yearly: 3   # Keep 3 yearly backups
+  
+  # Compression settings
+  compression:
+    enabled: true
+    algorithm: "gzip"
+    level: 6
+  
+  # Encryption settings
+  encryption:
+    enabled: true
+    algorithm: "AES-256-GCM"
+    key_file: "/etc/backup/encryption.key"
+  
+  # Storage destinations
+  destinations:
+    - name: "s3_primary"
+      type: "s3"
+      enabled: true
+      config:
+        bucket: "${BACKUP_S3_BUCKET}"
+        region: "${BACKUP_S3_REGION}"
+        access_key: "${AWS_ACCESS_KEY_ID}"
+        secret_key: "${AWS_SECRET_ACCESS_KEY}"
+        path_prefix: "ensimu-production"
+        storage_class: "STANDARD_IA"
+    
+    - name: "local_disk"
+      type: "filesystem"
+      enabled: true
+      config:
+        path: "/var/backups/ensimu"
+        permissions: "0750"
+    
+    - name: "remote_sftp"
+      type: "sftp"
+      enabled: false
+      config:
+        host: "backup.example.com"
+        port: 22
+        username: "backup_user"
+        private_key_file: "/etc/backup/sftp_key"
+        remote_path: "/backups/ensimu"
+
+# Database backup configuration
+database:
+  postgres:
+    enabled: true
+    host: "postgres"
+    port: 5432
+    database: "${POSTGRES_DB}"
+    username: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    
+    # Backup options
+    options:
+      format: "custom"  # custom, tar, plain, directory
+      compression: 9
+      verbose: true
+      exclude_tables: []
+      include_data: true
+      include_schema: true
+    
+    # Performance settings
+    jobs: 2
+    
+    # Custom pg_dump options
+    pg_dump_options:
+      - "--no-owner"
+      - "--no-privileges"
+      - "--create"
+      - "--clean"
+
+# Redis backup configuration
+redis:
+  enabled: true
+  host: "redis"
+  port: 6379
+  password: "${REDIS_PASSWORD}"
+  
+  # Backup method: rdb, aof, or both
+  method: "rdb"
+  
+  # Redis-specific options
+  options:
+    save_on_backup: true
+    include_config: true
+
+# File system backup configuration
+filesystem:
+  enabled: true
+  
+  # Paths to backup
+  include_paths:
+    - "/app/uploads"
+    - "/app/config"
+    - "/etc/nginx/ssl"
+    - "/var/log/app"
+  
+  # Paths to exclude
+  exclude_paths:
+    - "/app/uploads/tmp"
+    - "/app/cache"
+    - "*.tmp"
+    - "*.log"
+    - "__pycache__"
+  
+  # File system backup options
+  options:
+    follow_symlinks: false
+    preserve_permissions: true
+    preserve_timestamps: true
+    incremental: true
+
+# Application state backup
+application:
+  enabled: true
+  
+  # Configuration files to backup
+  config_files:
+    - "/app/config/production"
+    - "/etc/nginx/nginx.conf"
+    - "/etc/redis/redis.conf"
+    - "/etc/prometheus/prometheus.yml"
+  
+  # Secrets and certificates
+  secrets:
+    - "/etc/ssl/private"
+    - "/app/secrets"
+  
+  # Application data
+  data_directories:
+    - "/app/data"
+    - "/app/workflows"
+
+# Monitoring and notifications
+monitoring:
+  enabled: true
+  
+  # Health checks
+  health_checks:
+    pre_backup: true
+    post_backup: true
+    verify_integrity: true
+  
+  # Notifications
+  notifications:
+    email:
+      enabled: true
+      recipients:
+        - "ops@example.com"
+        - "admin@example.com"
+      notify_on:
+        - "success"
+        - "failure"
+        - "warning"
+    
+    slack:
+      enabled: false
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      channel: "#ops-alerts"
+    
+    prometheus:
+      enabled: true
+      metrics_port: 9091
+      job_name: "backup_exporter"
+
+# Recovery settings
+recovery:
+  # Point-in-time recovery options
+  point_in_time:
+    enabled: true
+    wal_archiving: true
+    archive_timeout: "60s"
+  
+  # Recovery testing
+  testing:
+    enabled: true
+    schedule: "0 4 * * 0"  # Weekly on Sunday at 4 AM
+    test_environment: "staging"
+  
+  # Restore verification
+  verification:
+    checksum_validation: true
+    data_integrity_check: true
+    application_startup_test: true
+
+# Performance and resource limits
+performance:
+  # Resource limits
+  cpu_limit: "2"
+  memory_limit: "4G"
+  io_limit: "100M"
+  
+  # Parallel processing
+  max_parallel_jobs: 3
+  
+  # Network settings
+  bandwidth_limit: "50M"
+  timeout: 3600
+  
+  # Temporary storage
+  temp_directory: "/tmp/backup"
+  temp_cleanup: true
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "json"
+  file: "/var/log/backup/backup.log"
+  max_size: "100M"
+  max_files: 10
+  
+  # Audit logging
+  audit:
+    enabled: true
+    file: "/var/log/backup/audit.log"
+    include_sensitive: false
+
+# Security settings
+security:
+  # Access control
+  access_control:
+    require_auth: true
+    allowed_users:
+      - "backup"
+      - "admin"
+    allowed_ips:
+      - "127.0.0.1"
+      - "10.0.0.0/8"
+  
+  # Data protection
+  data_protection:
+    anonymize_sensitive_data: true
+    exclude_personal_data: false
+    gdpr_compliance: true

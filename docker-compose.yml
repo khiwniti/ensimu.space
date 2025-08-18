@@ -1,0 +1,226 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ensumu-postgres
+    environment:
+      POSTGRES_DB: ensumu_db
+      POSTGRES_USER: ensumu_user
+      POSTGRES_PASSWORD: ensumu_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ensumu_user -d ensumu_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ensumu-network
+
+  # ChromaDB for vector storage
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ensumu-chromadb
+    environment:
+      CHROMA_SERVER_HOST: "0.0.0.0"
+      CHROMA_SERVER_HTTP_PORT: "8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ensumu-network
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: ensumu-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ensumu-network
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: ensumu-backend
+    environment:
+      # Database configuration
+      DATABASE_URL: postgresql://ensumu_user:ensumu_password@postgres:5432/ensumu_db
+      
+      # Redis configuration
+      REDIS_URL: redis://redis:6379/0
+      
+      # ChromaDB configuration
+      CHROMADB_HOST: chromadb
+      CHROMADB_PORT: 8000
+      
+      # Application settings
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      
+      # OpenAI API (optional - using Ollama instead)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      
+      # Ollama configuration for local AI models (running on host)
+      OLLAMA_API_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-codellama:13b}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.2}
+      
+      # Performance settings
+      MAX_WORKERS: 4
+      CHECKPOINT_TIMEOUT: 3600
+      
+      # CORS settings
+      ALLOWED_ORIGINS: "http://localhost:3000,http://frontend:3000"
+      
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/enhanced-simulation/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - ensumu-network
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: ensumu-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+      NEXT_PUBLIC_COPILOT_CLOUD_API_KEY: ${COPILOT_API_KEY:-}
+      NEXT_PUBLIC_OLLAMA_API_URL: http://localhost:11434
+      NEXT_PUBLIC_OLLAMA_MODEL: ${OLLAMA_MODEL:-codellama:13b}
+      NEXT_PUBLIC_ENABLE_3D_VISUALIZATION: "true"
+      NEXT_PUBLIC_ENABLE_REAL_TIME_UPDATES: "true"
+      NEXT_PUBLIC_AI_PROVIDER: "ollama"
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ensumu-network
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: ensumu-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - ensumu-network
+
+  # Monitoring and Observability
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ensumu-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - ensumu-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ensumu-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - ensumu-network
+
+# Named volumes for data persistence
+volumes:
+  postgres_data:
+    driver: local
+  chromadb_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# Network configuration
+networks:
+  ensumu-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

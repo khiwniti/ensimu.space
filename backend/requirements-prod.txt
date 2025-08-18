@@ -1,0 +1,117 @@
+# Production-specific dependencies for ensimu-space backend
+
+# WSGI Server
+gunicorn[gevent]==21.2.0
+
+# Monitoring and Observability
+prometheus-client==0.19.0
+psutil==5.9.6
+structlog==23.2.0
+
+# Performance and Caching
+redis[hiredis]==5.0.1
+asyncpg==0.29.0
+
+# Security
+cryptography==41.0.7
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Production Utilities
+python-multipart==0.0.6
+python-dotenv==1.0.0
+click==8.1.7
+
+# Database Migrations
+alembic==1.12.1
+
+# HTTP Client
+httpx==0.25.2
+
+# Validation
+email-validator==2.1.0
+
+# Timezone handling
+pytz==2023.3
+
+# JSON handling
+orjson==3.9.10
+
+# Async utilities
+anyio==4.1.0
+
+# Process management
+supervisor==4.2.5
+
+# Log rotation
+logrotate==0.1.0
+
+# System monitoring
+py-cpuinfo==9.0.0
+
+# Memory profiling (optional, for debugging)
+memory-profiler==0.61.0
+
+# Network utilities
+netifaces==0.11.0
+
+# File handling
+aiofiles==23.2.1
+
+# Compression
+zstandard==0.22.0
+
+# Configuration management
+pydantic-settings==2.1.0
+
+# Rate limiting
+slowapi==0.1.9
+
+# Background tasks
+celery[redis]==5.3.4
+
+# Message queue
+kombu==5.3.4
+
+# Distributed computing
+dask[complete]==2023.12.0
+
+# Scientific computing (for simulation data)
+numpy==1.25.2
+scipy==1.11.4
+
+# Data serialization
+msgpack==1.0.7
+
+# UUID utilities
+shortuuid==1.0.11
+
+# Date/time utilities
+arrow==1.3.0
+
+# Retry utilities
+tenacity==8.2.3
+
+# Circuit breaker pattern
+pybreaker==1.0.2
+
+# Health checks
+healthcheck==1.3.3
+
+# Metrics collection
+statsd==4.0.1
+
+# Profiling
+py-spy==0.3.14
+
+# Container utilities
+docker==6.1.3
+
+# Environment detection
+distro==1.8.0
+
+# Resource limits
+resource==0.2.1
+
+# Signal handling
+signal-utils==0.1.0

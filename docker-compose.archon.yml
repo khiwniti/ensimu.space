@@ -1,0 +1,148 @@
+# Archon OS Integration for Ensumu Simulation Platform
+
+version: '3.8'
+
+services:
+  # Existing services
+  ensumu-frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8181
+      - REACT_APP_WS_URL=ws://localhost:8181
+      - REACT_APP_ARCHON_MCP_URL=http://localhost:8051
+    depends_on:
+      - ensumu-backend
+      - archon-server
+    networks:
+      - ensumu-network
+
+  ensumu-backend:
+    build: ./backend
+    ports:
+      - "8181:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - ARCHON_MCP_URL=http://archon-mcp:8051
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+    depends_on:
+      - postgres
+      - redis
+      - archon-server
+    networks:
+      - ensumu-network
+
+  # Archon OS Services
+  archon-server:
+    image: archon/server:latest
+    ports:
+      - "8181:8181"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ARCHON_UI_PORT=3737
+      - ARCHON_SERVER_PORT=8181
+      - ARCHON_MCP_PORT=8051
+      - ARCHON_AGENTS_PORT=8052
+    volumes:
+      - archon_data:/app/data
+    networks:
+      - ensumu-network
+      - archon-network
+
+  archon-ui:
+    image: archon/ui:latest
+    ports:
+      - "3737:3737"
+    environment:
+      - ARCHON_SERVER_URL=http://archon-server:8181
+    depends_on:
+      - archon-server
+    networks:
+      - ensumu-network
+      - archon-network
+
+  archon-mcp:
+    image: archon/mcp:latest
+    ports:
+      - "8051:8051"
+    environment:
+      - ARCHON_SERVER_URL=http://archon-server:8181
+    depends_on:
+      - archon-server
+    networks:
+      - ensumu-network
+      - archon-network
+
+  archon-agents:
+    image: archon/agents:latest
+    ports:
+      - "8052:8052"
+    environment:
+      - ARCHON_SERVER_URL=http://archon-server:8181
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - PHYSICS_NEMO_URL=${PHYSICS_NEMO_URL}
+    depends_on:
+      - archon-server
+    networks:
+      - ensumu-network
+      - archon-network
+
+  # NVIDIA PhysicsNemo Service
+  physics-nemo:
+    image: nvcr.io/nvidia/physics-nemo:latest
+    ports:
+      - "8053:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    runtime: nvidia
+    volumes:
+      - physics_data:/workspace/data
+    networks:
+      - ensumu-network
+
+  # Supporting Services
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_DB=ensumu
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ensumu-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ensumu-network
+
+  # Vector Database for Archon
+  supabase:
+    image: supabase/postgres:15.1.0.117
+    environment:
+      - POSTGRES_PASSWORD=${SUPABASE_PASSWORD}
+    volumes:
+      - supabase_data:/var/lib/postgresql/data
+    networks:
+      - archon-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  archon_data:
+  physics_data:
+  supabase_data:
+
+networks:
+  ensumu-network:
+    driver: bridge
+  archon-network:
+    driver: bridge

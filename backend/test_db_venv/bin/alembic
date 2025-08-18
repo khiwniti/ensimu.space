@@ -1,0 +1,10 @@
+#!/bin/sh
+'''exec' /mnt/wsl/docker-desktop-bind-mounts/Ubuntu/15c2925cf1b750fbf158124db25f173ab574cd0e4e54ee152cfdc7d80f03e1c0/ensimu.space/ensumu-space/backend/test_db_venv/bin/python3 "$0" "$@"
+' '''
+# -*- coding: utf-8 -*-
+import re
+import sys
+from alembic.config import main
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main())

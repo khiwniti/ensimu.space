@@ -1,0 +1,436 @@
+version: '3.8'
+
+# Auto-scaling Docker Compose configuration for ensimu-space
+# This configuration supports horizontal scaling based on load metrics
+
+services:
+  # PostgreSQL Database (single instance with replication support)
+  postgres:
+    image: postgres:15-alpine
+    container_name: ensimu_postgres_primary
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ensimu_space}
+      POSTGRES_USER: ${POSTGRES_USER:-ensimu_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER:-replicator}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+      - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./config/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - ensimu_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ensimu_user} -d ${POSTGRES_DB:-ensimu_space}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+      placement:
+        constraints:
+          - node.role == manager
+
+  # Redis Cluster for high availability
+  redis-master:
+    image: redis:7-alpine
+    container_name: ensimu_redis_master
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory 1gb --maxmemory-policy allkeys-lru
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis_master_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - ensimu_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  redis-sentinel:
+    image: redis:7-alpine
+    command: redis-sentinel /etc/redis/sentinel.conf
+    volumes:
+      - ./config/redis/sentinel.conf:/etc/redis/sentinel.conf
+    networks:
+      - ensimu_network
+    depends_on:
+      - redis-master
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # Backend API with auto-scaling
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ensimu_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ensimu_space}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/0
+      ENVIRONMENT: production
+      DEBUG: false
+      LOG_LEVEL: INFO
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      WORKERS: ${BACKEND_WORKERS:-4}
+      MAX_CONNECTIONS: ${MAX_DB_CONNECTIONS:-20}
+      ENABLE_METRICS: true
+      METRICS_PORT: 8001
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis-master:6379/2
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+    ports:
+      - "8000"  # No host port binding for auto-scaling
+      - "8001"  # Metrics port
+    networks:
+      - ensimu_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: ${BACKEND_REPLICAS:-2}
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # Celery Workers for distributed task processing
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    command: celery -A app.libs.scaling.task_queue.celery_app worker --loglevel=info --concurrency=4 --queues=default,geometry,mesh,materials,physics,workflows
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ensimu_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ensimu_space}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis-master:6379/2
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+    networks:
+      - ensimu_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.libs.scaling.task_queue.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: ${CELERY_WORKER_REPLICAS:-3}
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Specialized Celery Workers for different agent types
+  celery-worker-geometry:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    command: celery -A app.libs.scaling.task_queue.celery_app worker --loglevel=info --concurrency=2 --queues=geometry
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ensimu_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ensimu_space}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis-master:6379/2
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+    networks:
+      - ensimu_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: ${GEOMETRY_WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          memory: 3G
+          cpus: '1.5'
+        reservations:
+          memory: 1.5G
+          cpus: '0.75'
+
+  celery-worker-mesh:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.production
+    command: celery -A app.libs.scaling.task_queue.celery_app worker --loglevel=info --concurrency=2 --queues=mesh
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ensimu_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ensimu_space}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis-master:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis-master:6379/2
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+    networks:
+      - ensimu_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: ${MESH_WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # Frontend with auto-scaling
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.production
+    environment:
+      NODE_ENV: production
+      REACT_APP_API_URL: ${FRONTEND_API_URL:-http://localhost:8000}
+      REACT_APP_WS_URL: ${FRONTEND_WS_URL:-ws://localhost:8000}
+    ports:
+      - "80"  # No host port binding for auto-scaling
+    networks:
+      - ensimu_network
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: ${FRONTEND_REPLICAS:-2}
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+
+  # HAProxy Load Balancer
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: ensimu_haproxy
+    volumes:
+      - ./config/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+      - ./ssl:/etc/ssl/certs
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"  # HAProxy stats
+    networks:
+      - ensimu_network
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8404/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+      placement:
+        constraints:
+          - node.role == manager
+
+  # Auto-scaling Controller
+  autoscaler:
+    build:
+      context: ./autoscaler
+      dockerfile: Dockerfile
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      PROMETHEUS_URL: http://prometheus:9090
+      SCALE_UP_THRESHOLD_CPU: 70
+      SCALE_UP_THRESHOLD_MEMORY: 80
+      SCALE_DOWN_THRESHOLD_CPU: 30
+      SCALE_DOWN_THRESHOLD_MEMORY: 40
+      MIN_REPLICAS: 1
+      MAX_REPLICAS: 10
+      SCALE_COOLDOWN: 300
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ensimu_network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ensimu_prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - ensimu_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Grafana for monitoring dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ensimu_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning
+    ports:
+      - "3001:3000"
+    networks:
+      - ensimu_network
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+networks:
+  ensimu_network:
+    driver: overlay
+    attachable: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_master_data:
+    driver: local
+  uploads_data:
+    driver: local
+  logs_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

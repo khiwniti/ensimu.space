@@ -1,0 +1,73 @@
+{
+  "compilerOptions": {
+    "target": "es5",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es6"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "brain": [
+        "./src/brain"
+      ],
+      "types": [
+        "./src/brain/data-contracts.ts"
+      ],
+      "components/*": [
+        "./src/components/*"
+      ],
+      "pages/*": [
+        "./src/pages/*"
+      ],
+      "app": [
+        "./src/app"
+      ],
+      "app/auth": [
+        "./src/app/auth"
+      ],
+      "utils/*": [
+        "./src/utils/*"
+      ],
+      "@/hooks/*": [
+        "./src/extensions/shadcn/hooks/*"
+      ],
+      "@/components/hooks/*": [
+        "./src/extensions/shadcn/hooks/*"
+      ],
+      "@/components/ui/*": [
+        "./src/extensions/shadcn/components/*"
+      ]
+    },
+    "strictNullChecks": true
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -1,0 +1,141 @@
+# Production application configuration for ensimu-space
+
+app:
+  name: "EnsimuSpace"
+  version: "1.0.0"
+  environment: "production"
+  debug: false
+  
+  # Server configuration
+  server:
+    host: "0.0.0.0"
+    port: 8000
+    workers: 4
+    worker_class: "uvicorn.workers.UvicornWorker"
+    worker_connections: 1000
+    max_requests: 1000
+    max_requests_jitter: 50
+    timeout: 30
+    keepalive: 2
+    
+  # Database configuration
+  database:
+    url: "${DATABASE_URL}"
+    pool_size: 20
+    max_overflow: 30
+    pool_pre_ping: true
+    pool_recycle: 3600
+    echo: false
+    echo_pool: false
+    
+  # Redis configuration
+  redis:
+    url: "${REDIS_URL}"
+    db: 0
+    max_connections: 50
+    socket_timeout: 5
+    socket_connect_timeout: 5
+    retry_on_timeout: true
+    health_check_interval: 30
+    
+  # Security configuration
+  security:
+    secret_key: "${SECRET_KEY}"
+    jwt_secret: "${JWT_SECRET}"
+    jwt_algorithm: "HS256"
+    jwt_expiration: 3600
+    password_hash_rounds: 12
+    session_timeout: 3600
+    rate_limit:
+      enabled: true
+      requests_per_minute: 100
+      burst_limit: 200
+    
+  # CORS configuration
+  cors:
+    allow_origins: 
+      - "https://your-domain.com"
+      - "https://www.your-domain.com"
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers: ["*"]
+    allow_credentials: true
+    max_age: 86400
+    
+  # File upload configuration
+  upload:
+    max_file_size: 104857600  # 100MB
+    allowed_extensions:
+      - "pdf"
+      - "txt"
+      - "docx"
+      - "xlsx"
+      - "csv"
+      - "json"
+      - "xml"
+    upload_path: "/app/uploads"
+    temp_path: "/tmp/uploads"
+    
+  # Workflow configuration
+  workflow:
+    max_concurrent_executions: 10
+    default_timeout: 3600
+    max_retry_attempts: 3
+    retry_delay: 5
+    queue_name: "workflows"
+    result_ttl: 86400
+    
+  # AI/ML configuration
+  ai:
+    openai:
+      api_key: "${OPENAI_API_KEY}"
+      model: "gpt-4"
+      max_tokens: 4000
+      temperature: 0.7
+      timeout: 30
+    
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+    metrics_port: 8001
+    health_check_interval: 30
+    log_level: "INFO"
+    log_format: "json"
+    
+  # Cache configuration
+  cache:
+    ttl: 3600
+    max_memory: 536870912  # 512MB
+    eviction_policy: "allkeys-lru"
+    
+  # Email configuration (if applicable)
+  email:
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: 587
+    smtp_user: "${SMTP_USER}"
+    smtp_password: "${SMTP_PASSWORD}"
+    smtp_tls: true
+    from_address: "${SMTP_FROM}"
+    
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention_days: 30
+    s3_bucket: "${BACKUP_S3_BUCKET}"
+    s3_region: "${BACKUP_S3_REGION}"
+    
+  # Feature flags
+  features:
+    workflow_caching: true
+    agent_metrics: true
+    hitl_checkpoints: true
+    file_compression: true
+    rate_limiting: true
+    
+  # Performance tuning
+  performance:
+    connection_pool_size: 20
+    query_timeout: 30
+    request_timeout: 60
+    max_request_size: 52428800  # 50MB
+    worker_memory_limit: 1073741824  # 1GB

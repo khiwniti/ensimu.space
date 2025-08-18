@@ -1,0 +1,528 @@
+apiVersion: apps/v1
+kind: Namespace
+metadata:
+  name: ensumu-space
+---
+# Frontend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ensumu-frontend
+  namespace: ensumu-space
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ensumu-frontend
+  template:
+    metadata:
+      labels:
+        app: ensumu-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ensumu/frontend:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: REACT_APP_API_URL
+          value: "https://api.ensumu-space.com"
+        - name: REACT_APP_WS_URL
+          value: "wss://api.ensumu-space.com"
+        - name: REACT_APP_ARCHON_SERVER_URL
+          value: "https://archon.ensumu-space.com"
+        - name: REACT_APP_ARCHON_MCP_URL
+          value: "https://archon-mcp.ensumu-space.com"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+# Backend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ensumu-backend
+  namespace: ensumu-space
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: ensumu-backend
+  template:
+    metadata:
+      labels:
+        app: ensumu-backend
+    spec:
+      containers:
+      - name: backend
+        image: ensumu/backend:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ensumu-secrets
+              key: database-url
+        - name: REDIS_URL
+          value: "redis://redis-service:6379"
+        - name: ARCHON_MCP_URL
+          value: "http://archon-mcp-service:8051"
+        - name: NVIDIA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ensumu-secrets
+              key: nvidia-api-key
+        - name: PHYSICS_NEMO_URL
+          value: "http://physics-nemo-service:8000"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+---
+# Archon Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archon-server
+  namespace: ensumu-space
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: archon-server
+  template:
+    metadata:
+      labels:
+        app: archon-server
+    spec:
+      containers:
+      - name: archon-server
+        image: archon/server:latest
+        ports:
+        - containerPort: 8181
+        env:
+        - name: SUPABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: archon-secrets
+              key: supabase-url
+        - name: SUPABASE_SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: archon-secrets
+              key: supabase-service-key
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: archon-secrets
+              key: openai-api-key
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: archon-data
+          mountPath: /app/data
+      volumes:
+      - name: archon-data
+        persistentVolumeClaim:
+          claimName: archon-data-pvc
+---
+# Archon MCP Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archon-mcp
+  namespace: ensumu-space
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: archon-mcp
+  template:
+    metadata:
+      labels:
+        app: archon-mcp
+    spec:
+      containers:
+      - name: archon-mcp
+        image: archon/mcp:latest
+        ports:
+        - containerPort: 8051
+        env:
+        - name: ARCHON_SERVER_URL
+          value: "http://archon-server-service:8181"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+---
+# NVIDIA PhysicsNemo Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: physics-nemo
+  namespace: ensumu-space
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: physics-nemo
+  template:
+    metadata:
+      labels:
+        app: physics-nemo
+    spec:
+      nodeSelector:
+        gpu: "nvidia"
+      containers:
+      - name: physics-nemo
+        image: nvcr.io/nvidia/physics-nemo:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ensumu-secrets
+              key: nvidia-api-key
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "8Gi"
+            cpu: "2000m"
+            nvidia.com/gpu: 1
+        volumeMounts:
+        - name: physics-data
+          mountPath: /workspace/data
+      volumes:
+      - name: physics-data
+        persistentVolumeClaim:
+          claimName: physics-data-pvc
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: ensumu-space
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "300m"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data-pvc
+---
+# Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: ensumu-frontend-service
+  namespace: ensumu-space
+spec:
+  selector:
+    app: ensumu-frontend
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ensumu-backend-service
+  namespace: ensumu-space
+spec:
+  selector:
+    app: ensumu-backend
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archon-server-service
+  namespace: ensumu-space
+spec:
+  selector:
+    app: archon-server
+  ports:
+  - port: 8181
+    targetPort: 8181
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archon-mcp-service
+  namespace: ensumu-space
+spec:
+  selector:
+    app: archon-mcp
+  ports:
+  - port: 8051
+    targetPort: 8051
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: physics-nemo-service
+  namespace: ensumu-space
+spec:
+  selector:
+    app: physics-nemo
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: ensumu-space
+spec:
+  selector:
+    app: redis
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ensumu-ingress
+  namespace: ensumu-space
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  tls:
+  - hosts:
+    - ensumu-space.com
+    - api.ensumu-space.com
+    - archon.ensumu-space.com
+    - archon-mcp.ensumu-space.com
+    secretName: ensumu-tls
+  rules:
+  - host: ensumu-space.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ensumu-frontend-service
+            port:
+              number: 80
+  - host: api.ensumu-space.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ensumu-backend-service
+            port:
+              number: 8000
+  - host: archon.ensumu-space.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: archon-server-service
+            port:
+              number: 8181
+  - host: archon-mcp.ensumu-space.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: archon-mcp-service
+            port:
+              number: 8051
+---
+# Persistent Volume Claims
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archon-data-pvc
+  namespace: ensumu-space
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: physics-data-pvc
+  namespace: ensumu-space
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data-pvc
+  namespace: ensumu-space
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: fast-ssd
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ensumu-backend-hpa
+  namespace: ensumu-space
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ensumu-backend
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ensumu-frontend-hpa
+  namespace: ensumu-space
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ensumu-frontend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+---
+# Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ensumu-network-policy
+  namespace: ensumu-space
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: nginx-ingress
+    - podSelector: {}
+  egress:
+  - to: []

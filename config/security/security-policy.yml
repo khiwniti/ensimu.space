@@ -1,0 +1,348 @@
+# Security Policy Configuration for EnsimuSpace Production
+
+security:
+  # General security settings
+  version: "1.0"
+  last_updated: "2024-01-01"
+  
+  # Authentication configuration
+  authentication:
+    # Password policy
+    password_policy:
+      min_length: 12
+      require_uppercase: true
+      require_lowercase: true
+      require_numbers: true
+      require_special_chars: true
+      max_age_days: 90
+      history_count: 12
+      lockout_threshold: 5
+      lockout_duration: 1800  # 30 minutes
+    
+    # Multi-factor authentication
+    mfa:
+      enabled: true
+      required_for_admin: true
+      methods:
+        - "totp"
+        - "sms"
+        - "email"
+      backup_codes: true
+    
+    # Session management
+    session:
+      timeout: 3600  # 1 hour
+      absolute_timeout: 28800  # 8 hours
+      secure_cookies: true
+      http_only_cookies: true
+      same_site: "strict"
+      csrf_protection: true
+    
+    # JWT configuration
+    jwt:
+      algorithm: "HS256"
+      expiration: 3600  # 1 hour
+      refresh_expiration: 604800  # 7 days
+      issuer: "ensimu-space"
+      audience: "ensimu-api"
+
+  # Authorization configuration
+  authorization:
+    # Role-based access control
+    rbac:
+      enabled: true
+      roles:
+        - name: "admin"
+          permissions: ["*"]
+        - name: "operator"
+          permissions: ["read", "execute", "monitor"]
+        - name: "user"
+          permissions: ["read", "execute"]
+        - name: "readonly"
+          permissions: ["read"]
+    
+    # Resource permissions
+    resources:
+      workflows:
+        create: ["admin", "operator"]
+        read: ["admin", "operator", "user", "readonly"]
+        update: ["admin", "operator"]
+        delete: ["admin"]
+        execute: ["admin", "operator", "user"]
+      
+      projects:
+        create: ["admin", "operator"]
+        read: ["admin", "operator", "user", "readonly"]
+        update: ["admin", "operator"]
+        delete: ["admin"]
+      
+      monitoring:
+        read: ["admin", "operator", "readonly"]
+        configure: ["admin"]
+
+  # Network security
+  network:
+    # Allowed IP ranges
+    allowed_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    
+    # Blocked IP ranges
+    blocked_ips: []
+    
+    # Rate limiting
+    rate_limiting:
+      enabled: true
+      global_limit: 1000  # requests per minute
+      per_ip_limit: 100   # requests per minute per IP
+      burst_allowance: 200
+      
+      # Endpoint-specific limits
+      endpoints:
+        "/api/auth/login":
+          limit: 5  # per minute
+          window: 60
+        "/api/workflows/execute":
+          limit: 10  # per minute
+          window: 60
+    
+    # DDoS protection
+    ddos_protection:
+      enabled: true
+      threshold: 10000  # requests per minute
+      block_duration: 3600  # 1 hour
+      
+    # Firewall rules
+    firewall:
+      enabled: true
+      default_policy: "deny"
+      rules:
+        - name: "allow_http"
+          protocol: "tcp"
+          port: 80
+          action: "allow"
+        - name: "allow_https"
+          protocol: "tcp"
+          port: 443
+          action: "allow"
+        - name: "allow_ssh"
+          protocol: "tcp"
+          port: 22
+          action: "allow"
+          source: "admin_ips"
+
+  # Data security
+  data:
+    # Encryption settings
+    encryption:
+      at_rest:
+        enabled: true
+        algorithm: "AES-256-GCM"
+        key_rotation: 90  # days
+      
+      in_transit:
+        enabled: true
+        min_tls_version: "1.2"
+        cipher_suites:
+          - "ECDHE-RSA-AES256-GCM-SHA384"
+          - "ECDHE-RSA-AES128-GCM-SHA256"
+          - "ECDHE-RSA-AES256-SHA384"
+    
+    # Data classification
+    classification:
+      levels:
+        - "public"
+        - "internal"
+        - "confidential"
+        - "restricted"
+      
+      handling_rules:
+        public:
+          encryption_required: false
+          access_logging: false
+        internal:
+          encryption_required: true
+          access_logging: true
+        confidential:
+          encryption_required: true
+          access_logging: true
+          approval_required: true
+        restricted:
+          encryption_required: true
+          access_logging: true
+          approval_required: true
+          admin_only: true
+    
+    # Data retention
+    retention:
+      default_period: 2555  # 7 years in days
+      policies:
+        user_data: 2555  # 7 years
+        log_data: 365    # 1 year
+        audit_data: 2555 # 7 years
+        temp_data: 30    # 30 days
+
+  # Input validation and sanitization
+  input_validation:
+    # SQL injection prevention
+    sql_injection:
+      use_parameterized_queries: true
+      escape_special_chars: true
+      validate_input_types: true
+    
+    # XSS prevention
+    xss_protection:
+      sanitize_html: true
+      escape_output: true
+      content_security_policy: true
+    
+    # File upload security
+    file_uploads:
+      max_size: 104857600  # 100MB
+      allowed_types:
+        - "application/pdf"
+        - "text/plain"
+        - "application/json"
+        - "text/csv"
+      scan_for_malware: true
+      quarantine_suspicious: true
+
+  # Monitoring and logging
+  monitoring:
+    # Security event logging
+    security_logging:
+      enabled: true
+      log_level: "INFO"
+      log_format: "json"
+      
+      # Events to log
+      events:
+        - "authentication_success"
+        - "authentication_failure"
+        - "authorization_failure"
+        - "privilege_escalation"
+        - "data_access"
+        - "configuration_change"
+        - "security_alert"
+    
+    # Intrusion detection
+    intrusion_detection:
+      enabled: true
+      sensitivity: "medium"
+      
+      # Detection rules
+      rules:
+        - name: "brute_force_login"
+          pattern: "failed_login_attempts > 5"
+          action: "block_ip"
+          duration: 3600
+        
+        - name: "suspicious_file_access"
+          pattern: "file_access_pattern_anomaly"
+          action: "alert"
+        
+        - name: "privilege_escalation"
+          pattern: "role_change_without_approval"
+          action: "alert_and_revert"
+    
+    # Security alerts
+    alerting:
+      enabled: true
+      channels:
+        - "email"
+        - "slack"
+        - "sms"
+      
+      # Alert thresholds
+      thresholds:
+        critical: 1    # Immediate alert
+        high: 5        # Alert within 5 minutes
+        medium: 15     # Alert within 15 minutes
+        low: 60        # Alert within 1 hour
+
+  # Vulnerability management
+  vulnerability_management:
+    # Automated scanning
+    scanning:
+      enabled: true
+      schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+      tools:
+        - "dependency_check"
+        - "container_scan"
+        - "static_analysis"
+    
+    # Patch management
+    patching:
+      auto_update_security: true
+      maintenance_window: "02:00-04:00"
+      notification_lead_time: 72  # hours
+    
+    # Penetration testing
+    pen_testing:
+      frequency: "quarterly"
+      external_vendor: true
+      scope: "full_application"
+
+  # Incident response
+  incident_response:
+    # Response team
+    team:
+      primary_contact: "security@example.com"
+      escalation_contact: "ciso@example.com"
+      
+    # Response procedures
+    procedures:
+      detection_time_target: 15    # minutes
+      response_time_target: 60     # minutes
+      containment_time_target: 240 # minutes
+    
+    # Communication plan
+    communication:
+      internal_notification: true
+      external_notification: true  # if required by law/regulation
+      customer_notification: true  # if customer data affected
+
+  # Compliance
+  compliance:
+    # Regulatory requirements
+    regulations:
+      - "GDPR"
+      - "SOC2"
+      - "ISO27001"
+    
+    # Audit requirements
+    audit:
+      frequency: "annual"
+      external_auditor: true
+      scope: "full_security_controls"
+    
+    # Documentation requirements
+    documentation:
+      security_policies: true
+      procedures: true
+      training_records: true
+      incident_reports: true
+
+  # Security training
+  training:
+    # Mandatory training
+    mandatory:
+      frequency: "annual"
+      topics:
+        - "password_security"
+        - "phishing_awareness"
+        - "data_handling"
+        - "incident_reporting"
+    
+    # Role-specific training
+    role_specific:
+      developers:
+        - "secure_coding"
+        - "vulnerability_assessment"
+      administrators:
+        - "system_hardening"
+        - "access_management"
+      users:
+        - "basic_security_awareness"
+        - "data_protection"
