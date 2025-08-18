@@ -84,9 +84,10 @@ WORKDIR /app
 # Copy application code
 COPY . .
 
-# Create necessary directories
+# Create necessary directories and fix permissions
 RUN mkdir -p /app/data /app/logs /app/temp && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chown -R appuser:appuser /root/.local
 
 # Switch to app user
 USER appuser
