@@ -118,18 +118,18 @@ def create_app() -> FastAPI:
             allowed_hosts=["yourdomain.com", "*.yourdomain.com"]
         )
 
-    # Add custom middleware
-    @app.middleware("http")
+    # Add custom middleware (disabled for now)
+    # @app.middleware("http") 
     # async def add_security_headers(request: Request, call_next):
-    #     return security_headers_middleware(request, call_next)
+    #     return await security_headers_middleware(request, call_next)
 
     # @app.middleware("http")
     # async def add_performance_monitoring(request: Request, call_next):
-    #     return performance_middleware(request, call_next)
+    #     return await performance_middleware(request, call_next)
 
     # @app.middleware("http")
     # async def add_rate_limiting(request: Request, call_next):
-    #     return rate_limit_middleware(request, call_next)
+    #     return await rate_limit_middleware(request, call_next)
 
     # Global exception handler
     @app.exception_handler(Exception)
